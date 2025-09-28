@@ -2,10 +2,9 @@
 
 import { Button, HotkeyButton } from '@bounty/ui/components/button';
 import { cn } from '@bounty/ui/lib/utils';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useCallback, useMemo, useRef } from 'react';
-import { useForm } from 'react-hook-form';
-import { z } from 'zod';
+import { useCallback, useRef } from 'react';
+import { useCommentForm, useCharacterCount } from '@/hooks/use-form-state';
+import { componentClasses } from '@/lib/design-tokens';
 
 // Types
 interface BountyCommentFormProps {
@@ -21,65 +20,31 @@ interface BountyCommentFormProps {
   disabled?: boolean;
 }
 
-type FormData = {
-  content: string;
-};
-
-// Custom hook for character counting with cursor tracking
-function useCharacterCount(content: string, maxChars: number) {
-  return useMemo(() => {
-    const remaining = maxChars - content.length;
-    const isOverLimit = remaining < 0;
-    const isNearLimit = remaining <= Math.min(50, maxChars * 0.2);
-
-    return {
-      remaining,
-      isOverLimit,
-      isNearLimit,
-      progress: Math.min((content.length / maxChars) * 100, 100),
-    };
-  }, [content, maxChars]);
-}
-
-// Custom hook for form logic
-function useCommentForm({
-  maxChars,
+export default function BountyCommentForm({
+  maxChars = 245,
   onSubmit,
+  isSubmitting = false,
+  error,
+  errorKey,
+  placeholder = 'Add a comment',
+  submitLabel = 'Post',
   onCancel,
-}: {
-  maxChars: number;
-  onSubmit: (content: string) => void;
-  onCancel?: () => void;
-}) {
-  const schema = useMemo(
-    () =>
-      z.object({
-        content: z
-          .string()
-          .min(1, 'Comment cannot be empty')
-          .max(maxChars, `Comment cannot exceed ${maxChars} characters`),
-      }),
-    [maxChars]
-  );
+  autoFocus = false,
+  disabled = false,
+}: BountyCommentFormProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const form = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { content: '' },
-    mode: 'onChange',
-  });
-
-  const handleFormSubmit = useCallback(
-    (data: FormData) => {
-      const trimmedContent = data.content.trim();
-      if (!trimmedContent) {
-        return;
-      }
-
-      onSubmit(trimmedContent);
-      form.reset();
-    },
-    [onSubmit, form]
-  );
+  const {
+    form,
+    handleSubmit,
+    isSubmitting: formSubmitting,
+    submitError,
+    content,
+    remaining,
+    isOverLimit,
+    isNearLimit,
+    canSubmit,
+  } = useCommentForm(maxChars, onSubmit);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -97,54 +62,15 @@ function useCommentForm({
 
         if (isCommandEnter || isPlainEnter) {
           e.preventDefault();
-          form.handleSubmit(handleFormSubmit)();
+          handleSubmit();
         }
       }
     },
-    [onCancel, form, handleFormSubmit]
-  );
-
-  return {
-    form,
-    handleFormSubmit,
-    handleKeyDown,
-  };
-}
-
-export default function BountyCommentForm({
-  maxChars = 245,
-  onSubmit,
-  isSubmitting = false,
-  error,
-  errorKey,
-  placeholder = 'Add a comment',
-  submitLabel = 'Post',
-  onCancel,
-  autoFocus = false,
-  disabled = false,
-}: BountyCommentFormProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const { form, handleKeyDown } = useCommentForm({
-    maxChars,
-    onSubmit,
-    onCancel,
-  });
-
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors, isValid },
-  } = form;
-  const content = watch('content');
-  const { remaining, isOverLimit, isNearLimit } = useCharacterCount(
-    content,
-    maxChars
+    [onCancel, handleSubmit]
   );
 
   // Combine refs and event handlers
-  const { ref: formRef, onChange, ...fieldProps } = register('content');
+  const { ref: formRef, onChange, ...fieldProps } = form.register('content');
   const combinedRef = useCallback(
     (el: HTMLTextAreaElement | null) => {
       formRef(el);
@@ -160,25 +86,10 @@ export default function BountyCommentForm({
     [onChange]
   );
 
-  // Determine if form can be submitted
-  const canSubmit =
-    !(isSubmitting || disabled) &&
-    isValid &&
-    content.trim().length > 0 &&
-    !isOverLimit;
-
   // Error message with priority: prop error > form errors
-  const errorMessage = error || (errors.content?.message as string);
+  const errorMessage = error || submitError;
   const hasError = Boolean(errorMessage);
-
-  const onValidatedSubmit = async (data: FormData) => {
-    const trimmed = data.content.trim();
-    if (!trimmed) {
-      return;
-    }
-    onSubmit(trimmed);
-    form.reset();
-  };
+  const isActuallySubmitting = isSubmitting || formSubmitting;
 
   return (
     <form
@@ -195,16 +106,13 @@ export default function BountyCommentForm({
           aria-invalid={hasError}
           autoFocus={autoFocus}
           className={cn(
-            'min-h-16 w-full rounded-md border bg-neutral-900 p-3 text-neutral-200 text-sm',
-            'resize-none placeholder:text-neutral-500',
-            'focus:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-neutral-700',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            'transition-colors duration-150',
+            componentClasses.input,
+            'min-h-16',
             isOverLimit
               ? 'border-red-700 focus:ring-red-700'
               : 'border-neutral-800'
           )}
-          disabled={isSubmitting || disabled}
+          disabled={isActuallySubmitting || disabled}
           onChange={handleInputChange}
           placeholder={placeholder}
           ref={combinedRef}
@@ -254,8 +162,8 @@ export default function BountyCommentForm({
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button
-            className="border-neutral-700 bg-neutral-800/40 text-neutral-300 hover:bg-neutral-700/40"
-            disabled={isSubmitting || disabled}
+            className={componentClasses.button.secondary}
+            disabled={isActuallySubmitting || disabled}
             onClick={onCancel}
             size="sm"
             type="button"
@@ -265,13 +173,13 @@ export default function BountyCommentForm({
           </Button>
         )}
         <HotkeyButton
-          className={cn(isSubmitting && 'cursor-not-allowed opacity-75')}
-          disabled={!canSubmit}
+          className={cn(isActuallySubmitting && 'cursor-not-allowed opacity-75')}
+          disabled={!canSubmit || isActuallySubmitting || disabled}
           hotkey="⏎"
           size="sm"
           type="submit"
         >
-          {isSubmitting ? 'Posting...' : submitLabel}
+          {isActuallySubmitting ? 'Posting...' : submitLabel}
         </HotkeyButton>
       </div>
     </form>

@@ -5,7 +5,6 @@ import {
 } from '@bounty/ui/components/avatar';
 import { addNavigationContext } from '@bounty/ui/hooks/use-navigation-context';
 import { formatLargeNumber } from '@bounty/ui/lib/utils';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { Check, Clock, MessageCircle } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -13,7 +12,8 @@ import { memo } from 'react';
 import BookmarkButton from '@/components/bounty/bookmark-button';
 import { UpvoteButton } from '@/components/bounty/bounty-actions';
 import type { Bounty } from '@/types/dashboard';
-import { trpc } from '@/utils/trpc';
+import { useBountyMutation } from '@/hooks/use-trpc-mutation';
+import { componentClasses, cn } from '@/lib/design-tokens';
 import { MarkdownContent } from './markdown-content';
 
 interface BountyCardProps {
@@ -32,6 +32,7 @@ export const BountyCard = memo(function BountyCard({
 }: BountyCardProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { voteBounty, toggleBookmark } = useBountyMutation();
 
   const handleClick = () => {
     const url = addNavigationContext(`/bounty/${bounty.id}`, pathname);
@@ -47,157 +48,24 @@ export const BountyCard = memo(function BountyCard({
 
   const creatorInitial = bounty.creator.name?.charAt(0)?.toUpperCase() || 'U';
   const creatorName = bounty.creator.name || 'Anonymous';
-  const queryClient = useQueryClient();
   const voteCount = initialStats?.voteCount ?? 0;
   const isVotedInitial = initialStats?.isVoted ?? false;
-  const voteMutation = useMutation({
-    ...trpc.bounties.voteBounty.mutationOptions(),
-  });
-  const bookmarkMutation = useMutation({
-    ...trpc.bounties.toggleBountyBookmark.mutationOptions(),
-  });
 
   const handleUpvote = () => {
-    const votesKey = trpc.bounties.getBountyVotes.queryKey({
-      bountyId: bounty.id,
-    });
-    const previousVotes = queryClient.getQueryData<{
-      count: number;
-      isVoted: boolean;
-    }>(votesKey);
-    const nextVotes = previousVotes
-      ? {
-          count: previousVotes.isVoted
-            ? Math.max(0, Number(previousVotes.count) - 1)
-            : Number(previousVotes.count) + 1,
-          isVoted: !previousVotes.isVoted,
-        }
-      : { count: isVotedInitial ? 0 : 1, isVoted: !isVotedInitial };
-    queryClient.setQueryData(votesKey, nextVotes);
-    const previousMany = queryClient.getQueriesData<{
-      stats: {
-        bountyId: string;
-        voteCount: number;
-        isVoted: boolean;
-        commentCount: number;
-        bookmarked: boolean;
-      }[];
-    }>({
-      queryKey: trpc.bounties.getBountyStatsMany.queryKey(undefined) as any,
-    });
-    const updateList = previousMany.map(([key, previous]) => {
-      const current = previous?.stats?.find?.((s) => s.bountyId === bounty.id);
-      if (!(previous && current)) return [key, previous] as const;
-      const next = {
-        stats: previous.stats.map((s) =>
-          s.bountyId === bounty.id
-            ? {
-                ...s,
-                voteCount: current.isVoted
-                  ? Math.max(0, current.voteCount - 1)
-                  : current.voteCount + 1,
-                isVoted: !current.isVoted,
-              }
-            : s
-        ),
-      };
-      queryClient.setQueryData(key, next);
-      return [key, previous] as const;
-    });
-    voteMutation.mutate(
-      { bountyId: bounty.id },
-      {
-        onError: () => {
-          if (previousVotes) queryClient.setQueryData(votesKey, previousVotes);
-          updateList.forEach(
-            ([key, previous]) =>
-              previous && queryClient.setQueryData(key, previous)
-          );
-        },
-        onSuccess: (data) => {
-          queryClient.setQueryData(votesKey, {
-            count: Number(data?.count || 0),
-            isVoted: Boolean(data?.voted),
-          });
-          const manyKeys = queryClient.getQueriesData<{
-            stats: {
-              bountyId: string;
-              voteCount: number;
-              isVoted: boolean;
-              commentCount: number;
-              bookmarked: boolean;
-            }[];
-          }>({
-            queryKey: trpc.bounties.getBountyStatsMany.queryKey(
-              undefined
-            ) as any,
-          });
-          manyKeys.forEach(([key, current]) => {
-            if (!current) return;
-            const next = {
-              stats: current.stats.map((s) =>
-                s.bountyId === bounty.id
-                  ? {
-                      ...s,
-                      voteCount: Number(data?.count || 0),
-                      isVoted: Boolean(data?.voted),
-                    }
-                  : s
-              ),
-            };
-            queryClient.setQueryData(key, next);
-          });
-        },
-      }
-    );
+    voteBounty.mutateWithOptimistic({ bountyId: bounty.id });
   };
 
   const handleToggleBookmark = () => {
-    const previousMany = queryClient.getQueriesData<{
-      stats: {
-        bountyId: string;
-        voteCount: number;
-        isVoted: boolean;
-        commentCount: number;
-        bookmarked: boolean;
-      }[];
-    }>({
-      queryKey: trpc.bounties.getBountyStatsMany.queryKey(undefined) as any,
-    });
-    const updateList = previousMany.map(([key, previous]) => {
-      const current = previous?.stats?.find?.((s) => s.bountyId === bounty.id);
-      if (!(previous && current)) return [key, previous] as const;
-      const next = {
-        stats: previous.stats.map((s) =>
-          s.bountyId === bounty.id ? { ...s, bookmarked: !s.bookmarked } : s
-        ),
-      };
-      queryClient.setQueryData(key, next);
-      return [key, previous] as const;
-    });
-    bookmarkMutation.mutate(
-      { bountyId: bounty.id },
-      {
-        onError: () => {
-          updateList.forEach(
-            ([key, previous]) =>
-              previous && queryClient.setQueryData(key, previous)
-          );
-        },
-        onSettled: () =>
-          queryClient.invalidateQueries({
-            queryKey: trpc.bounties.getBountyStatsMany.queryKey(
-              undefined
-            ) as any,
-          }),
-      }
-    );
+    toggleBookmark.mutateWithOptimistic({ bountyId: bounty.id });
   };
 
   return (
     <div
       aria-label={`View bounty: ${bounty.title}`}
-      className="flex w-full cursor-pointer flex-col items-start gap-3 rounded-lg border border-[#383838]/20 bg-[#191919] p-6 transition duration-100 ease-out active:scale-[.98]"
+      className={cn(
+        componentClasses.cardHover,
+        'flex w-full cursor-pointer flex-col items-start gap-3 p-6'
+      )}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
@@ -205,7 +73,7 @@ export const BountyCard = memo(function BountyCard({
     >
       <div className="flex w-full items-center justify-between">
         <div className="flex items-center gap-2">
-          <Avatar className="h-10 w-10">
+          <Avatar className={componentClasses.avatar}>
             <AvatarImage
               alt={bounty.creator.name || ''}
               src={bounty.creator.image || ''}
@@ -214,14 +82,14 @@ export const BountyCard = memo(function BountyCard({
           </Avatar>
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-sm text-white">
+              <span className={cn('font-medium text-sm', componentClasses.text.primary)}>
                 {creatorName}
               </span>
               <div className="flex h-4 w-4 rotate-45 transform items-center justify-center rounded bg-blue-500">
                 <Check className="-rotate-45 h-2.5 w-2.5 transform text-white" />
               </div>
             </div>
-            <span className="text-gray-400 text-xs capitalize">
+            <span className={cn('text-xs capitalize', componentClasses.text.muted)}>
               {bounty.status.replace('_', ' ')}
             </span>
           </div>
@@ -237,17 +105,17 @@ export const BountyCard = memo(function BountyCard({
             bountyId={bounty.id}
             onToggle={handleToggleBookmark}
           />
-          <span className="font-semibold text-green-400 text-sm">
+          <span className={cn('font-semibold text-sm', componentClasses.text.accent)}>
             ${formatLargeNumber(bounty.amount)}
           </span>
         </div>
       </div>
 
       <div className="w-full">
-        <h3 className="mb-2 line-clamp-2 font-medium text-base text-white">
+        <h3 className={cn('mb-2 line-clamp-2 font-medium text-base', componentClasses.text.primary)}>
           {bounty.title}
         </h3>
-        <div className="relative text-gray-400 text-sm">
+        <div className={cn('relative text-sm', componentClasses.text.muted)}>
           <div className="max-h-24 overflow-hidden pr-1">
             <MarkdownContent content={bounty.description} />
           </div>
@@ -255,7 +123,7 @@ export const BountyCard = memo(function BountyCard({
         </div>
       </div>
 
-      <div className="mt-auto flex items-center gap-4 text-gray-400 text-xs">
+      <div className={cn('mt-auto flex items-center gap-4 text-xs', componentClasses.text.muted)}>
         <div className="flex items-center gap-1">
           <Clock aria-hidden="true" className="h-4 w-4" />
           <time

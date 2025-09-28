@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@bounty/ui/components/card';
+import { ListCard } from '@/components/shared/data-card';
 import type { BetaApplication } from '@/types/beta-application';
 import { BetaApplicationCard } from './beta-application-card';
 
@@ -21,40 +15,25 @@ export function BetaApplicationsTable({
   total,
   isLoading,
 }: BetaApplicationsTableProps) {
-  return (
-    <Card className="border border-neutral-800 bg-[#222222]">
-      <CardHeader>
-        <CardTitle className="font-medium text-neutral-300 text-sm">
-          Applications ({total})
-        </CardTitle>
-        <CardDescription className="text-neutral-500 text-xs">
-          Review applications and grant beta access
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="space-y-3 py-6">
-            <div className="h-6 w-40 animate-pulse rounded bg-neutral-800" />
-            <div className="h-24 w-full animate-pulse rounded bg-neutral-800" />
-            <div className="h-24 w-full animate-pulse rounded bg-neutral-800" />
-            <div className="h-24 w-full animate-pulse rounded bg-neutral-800" />
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {applications.map((app) => (
-              <BetaApplicationCard application={app} key={app.id} />
-            ))}
+  const items = applications.map(app => ({
+    id: app.id,
+    title: app.projectName,
+    description: `by ${app.user?.name || 'Unknown'} (${app.user?.email || 'No email'})`,
+    badge: {
+      text: app.status,
+      variant: app.status === 'approved' ? 'default' : 
+               app.status === 'rejected' ? 'destructive' : 'secondary'
+    } as const,
+    actions: <BetaApplicationCard application={app} />
+  }));
 
-            {applications.length === 0 && (
-              <div className="py-8 text-center">
-                <p className="text-neutral-500 text-sm">
-                  No applications found
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+  return (
+    <ListCard
+      title={`Applications (${total})`}
+      description="Review applications and grant beta access"
+      items={items}
+      loading={isLoading}
+      emptyMessage="No applications found"
+    />
   );
 }
